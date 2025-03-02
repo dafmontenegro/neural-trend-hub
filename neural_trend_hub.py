@@ -1,10 +1,11 @@
-import json
-import requests
+from langchain_ollama import OllamaLLM
 from bs4 import BeautifulSoup
-import datetime
 import urllib.parse
-import re
+import requests
+import datetime
 import logging
+import json
+import re
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -73,7 +74,6 @@ def scrape_google_news(search_term, location="co", language="es", min_results=10
             - used_start_date (datetime.date): The start date used.
             - used_end_date (datetime.date): The end date used.
     """
-    # Define candidate date ranges (in days) to try if minimum results are not met.
     candidate_ranges = [days, 7, 30, 90]
     final_news = []
     used_range = None
@@ -83,13 +83,12 @@ def scrape_google_news(search_term, location="co", language="es", min_results=10
         start_date = end_date - datetime.timedelta(days=candidate_days)
         url = build_google_news_url(search_term, start_date, end_date, expected_results, location, language)
         
-        # Log the generated URL
         logging.info(f"Generated URL for {candidate_days}-day range:")
         logging.info(url)
         
         headers = {
             "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " \
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/101.0.4951.54 Safari/537.36"
         }
         
@@ -124,7 +123,6 @@ def scrape_google_news(search_term, location="co", language="es", min_results=10
                 continue
         
         logging.info(f"Found {len(news_results)} articles for a {candidate_days}-day range.")
-        # If we have met the minimum or this is the last candidate, use these results.
         if len(news_results) >= min_results or candidate_days == candidate_ranges[-1]:
             final_news = news_results
             used_range = (start_date, end_date)
@@ -134,15 +132,69 @@ def scrape_google_news(search_term, location="co", language="es", min_results=10
 
     return final_news, used_range[0], used_range[1]
 
+def generate_report_prompt(news_data, search_term, location, language, start_date, end_date):
+    """
+    Generate a prompt for the LLM to produce a trend report.
+    
+    The prompt instructs the LLM to analyze the provided news articles and generate a report
+    intended for the person whose name was used as the search term (e.g., Gustavo Petro), 
+    summarizing what has been said about them during the defined period.
+    
+    The report must include:
+      - A title with the search term.
+      - The date range of the news collection.
+      - The total number of news articles analyzed.
+      - The three most significant articles (listing their title, source, and snippet).
+      - The location and language of the search.
+      - Additional pertinent details and insights.
+    
+    Parameters:
+        news_data (list): List of dictionaries containing the scraped news articles.
+        search_term (str): The search term used.
+        location (str): The geographic location code.
+        language (str): The language code.
+        start_date (datetime.date): The start date of the news collection.
+        end_date (datetime.date): The end date of the news collection.
+        
+    Returns:
+        str: The complete prompt for the LLM.
+    """
+    total_articles = len(news_data)
+    # Select the first 3 articles as the "most significant"
+    top_articles = news_data[:3]
+    
+    prompt = f"Genera un informe de tendencia profesional en {language} dirigido a {search_term}.\n\n"
+    prompt += f"Título del Informe: {search_term}\n"
+    prompt += f"Rango de Fechas: {start_date.strftime('%Y-%m-%d')} a {end_date.strftime('%Y-%m-%d')}\n"
+    prompt += f"Ubicación: {location}\n"
+    prompt += f"Idioma de las Noticias: {language}\n"
+    prompt += f"Total de Noticias Analizadas: {total_articles}\n\n"
+    
+    prompt += "Top 3 Noticias Más Relevantes:\n"
+    for idx, article in enumerate(top_articles, start=1):
+        prompt += f"{idx}. Título: {article.get('title', '')}\n"
+        prompt += f"   Fuente: {article.get('source', '')}\n"
+        prompt += f"   Extracto: {article.get('snippet', '')}\n\n"
+    
+    prompt += "Analiza las noticias anteriores y genera un informe detallado que resuma lo que se ha dicho sobre ti durante el período indicado. "
+    prompt += "El informe debe ser preciso, profesional y contener los siguientes detalles:\n"
+    prompt += " - Un resumen de las tendencias y opiniones predominantes.\n"
+    prompt += " - Las implicaciones potenciales de las noticias para tu imagen y acciones futuras.\n"
+    prompt += " - Cualquier otro detalle relevante basado en el análisis de las noticias.\n\n"
+    prompt += "El informe se debe escribir de manera clara y dirigida a ti, explicando en detalle el análisis realizado con la información recopilada."
+    
+    return prompt
+
 if __name__ == "__main__":
-    # Example call to the function:
-    search_term = "Donald Trump"
-    location = "us"
-    language = "en"
+    # Set parameters for scraping: using Gustavo Petro in Colombia (español)
+    search_term = "Gustavo Petro"
+    location = "co"   # Colombia
+    language = "es"   # Spanish
     min_results = 3
-    expected_results = 10
+    expected_results = 15
     initial_days = 1
     
+    # Scrape Google News
     news_data, start_date, end_date = scrape_google_news(search_term, location, language, min_results, expected_results, initial_days)
     
     if news_data:
@@ -154,5 +206,21 @@ if __name__ == "__main__":
             json.dump(news_data, f, ensure_ascii=False, indent=2)
         
         logging.info(f"Scraping complete. {len(news_data)} news articles saved to {filename}.")
+        
+        # Generate the prompt for the trend report
+        report_prompt = generate_report_prompt(news_data, search_term, location, language, start_date, end_date)
+        
+        # Initialize the LLM using the deepseek-r1:1.5b model via Ollama
+        llm_deepseek_r1 = OllamaLLM(model="llama3.2:3b")
+        
+        # Invoke the model with the prompt to generate the trend report
+        trend_report = llm_deepseek_r1.invoke(report_prompt)
+        
+        # Save the generated trend report to a text file
+        report_filename = f"{to_snake_case(search_term)}_trend_report_{start_str}_{end_str}.txt"
+        with open(report_filename, "w", encoding="utf-8") as f:
+            f.write(trend_report)
+        
+        logging.info(f"Trend report generated and saved to {report_filename}.")
     else:
         logging.info("No news articles were retrieved.")
