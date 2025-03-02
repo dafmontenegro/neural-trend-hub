@@ -136,11 +136,11 @@ def scrape_google_news(search_term, location="co", language="es", min_results=10
 
 if __name__ == "__main__":
     # Example call to the function:
-    search_term = input("Enter the search term: ")
+    search_term = "Donald Trump"
     location = "us"
     language = "en"
-    min_results = 10
-    expected_results = 100
+    min_results = 3
+    expected_results = 10
     initial_days = 1
     
     news_data, start_date, end_date = scrape_google_news(search_term, location, language, min_results, expected_results, initial_days)
