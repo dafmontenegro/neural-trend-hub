@@ -166,13 +166,21 @@ def generate_report_prompt(news_data, search_term, location, language, start_dat
         prompt += f"   Source: {article.get('source', '')}\n"
         prompt += f"   Snippet: {article.get('snippet', '')}\n\n"
     
-    prompt += "Analyze the above news articles and generate a detailed report summarizing what has been said about you during the indicated period. "
+    prompt += f"Analyze ALL {total_articles} news articles comprehensively. "
+    prompt += "Generate a detailed report summarizing what has been said about you during the indicated period. "
     prompt += "The report must be precise, professional, and contain the following details:\n"
-    prompt += " - A summary of predominant trends and opinions.\n"
+    prompt += " - A summary of predominant trends and opinions across ALL collected news articles.\n"
     prompt += " - The potential implications of the news for your image and future actions.\n"
-    prompt += " - Any other relevant details based on the analysis of the news.\n\n"
+    prompt += " - A comprehensive analysis that goes beyond the top 3 articles.\n\n"
     prompt += "The report should be written clearly and addressed to you, explaining in detail the analysis performed with the collected information.\n\n"
-    prompt += "IMPORTANT: The output must be in plain text format without any special formatting like bold, italics, or markdown. Write the report as continuous text with appropriate paragraph breaks."
+    prompt += "IMPORTANT: The output must be in plain text format without any special formatting like bold, italics, or markdown. "
+    prompt += "Write the report as continuous text with appropriate paragraph breaks.\n\n"
+    prompt += "SECTION: TOP 3 MOST SIGNIFICANT ARTICLES (for quick reference)\n"
+    for idx, article in enumerate(top_articles, start=1):
+        prompt += f"{idx}. Comprehensive Summary:\n"
+        prompt += f"   Title: {article.get('title', '')}\n"
+        prompt += f"   Source: {article.get('source', '')}\n"
+        prompt += f"   Key Points: [Provide a concise, insightful summary of the article's main message and potential impact]\n\n"
     
     return prompt
 
@@ -197,7 +205,7 @@ if __name__ == "__main__":
     search_term = "Donald Trump"
     location = "us"   # United States
     language = "en"   # English
-    output_language = "en"  # Language for the report
+    output_languages = ["en"]  # Multiple output languages
     min_results = 10
     expected_results = 100
     initial_days = 1
@@ -212,24 +220,21 @@ if __name__ == "__main__":
     )
     
     if news_data:
+        # Get current timestamp for filename
+        current_time = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
         start_str = start_date.strftime("%Y_%m_%d")
         end_str = end_date.strftime("%Y_%m_%d")
         
         # Save scraped news data
         json_filename = os.path.join(
             reports_folder, 
-            f"{to_snake_case(search_term)}_{start_str}_{end_str}.json"
+            f"{to_snake_case(search_term)}_{start_str}_{end_str}_{current_time}_en.json"
         )
         
         with open(json_filename, "w", encoding="utf-8") as f:
             json.dump(news_data, f, ensure_ascii=False, indent=2)
         
         logging.info(f"Scraping complete. {len(news_data)} news articles saved to {json_filename}.")
-        
-        # Generate the prompt for the trend report
-        report_prompt = generate_report_prompt(
-            news_data, search_term, location, language, start_date, end_date, output_language
-        )
         
         # List of LLMs to use
         llm_list = [
@@ -238,27 +243,34 @@ if __name__ == "__main__":
             {"name": "phi3.5:3.8b", "model": "phi3.5:3.8b"}
         ]
         
-        # Generate reports with each LLM
-        for llm_info in llm_list:
-            try:
-                # Initialize the specific LLM
-                llm = OllamaLLM(model=llm_info["model"])
-                
-                # Invoke the model with the prompt to generate the trend report
-                trend_report = llm.invoke(report_prompt)
-                
-                # Save the generated trend report to a text file with LLM name in filename
-                report_filename = os.path.join(
-                    reports_folder,
-                    f"{to_snake_case(search_term)}_trend_report_{start_str}_{end_str}_{llm_info['name'].replace(':', '_')}.txt"
-                )
-                
-                with open(report_filename, "w", encoding="utf-8") as f:
-                    f.write(trend_report)
-                
-                logging.info(f"Trend report generated using {llm_info['name']} and saved to {report_filename}.")
-                
-            except Exception as e:
-                logging.error(f"Error generating report with {llm_info['name']}: {e}")
+        # Generate reports for each output language
+        for output_language in output_languages:
+            # Generate the prompt for the trend report
+            report_prompt = generate_report_prompt(
+                news_data, search_term, location, language, start_date, end_date, output_language
+            )
+            
+            # Generate reports with each LLM
+            for llm_info in llm_list:
+                try:
+                    # Initialize the specific LLM
+                    llm = OllamaLLM(model=llm_info["model"])
+                    
+                    # Invoke the model with the prompt to generate the trend report
+                    trend_report = llm.invoke(report_prompt)
+                    
+                    # Save the generated trend report to a text file with LLM name and language in filename
+                    report_filename = os.path.join(
+                        reports_folder,
+                        f"{to_snake_case(search_term)}_trend_report_{start_str}_{end_str}_{current_time}_{llm_info['name'].replace(':', '_')}_{output_language}.txt"
+                    )
+                    
+                    with open(report_filename, "w", encoding="utf-8") as f:
+                        f.write(trend_report)
+                    
+                    logging.info(f"Trend report generated using {llm_info['name']} in {output_language} and saved to {report_filename}.")
+                    
+                except Exception as e:
+                    logging.error(f"Error generating report with {llm_info['name']} in {output_language}: {e}")
     else:
         logging.info("No news articles were retrieved.")
